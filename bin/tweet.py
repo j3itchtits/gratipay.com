@@ -14,6 +14,13 @@ twitter = Twitter(
     env.twitter_consumer_secret,
     env.twitter_callback,
 )
+sess = twitter.get_auth_session()
+response = sess.get('https://api.twitter.com/1.1/account/settings.json')
+print(response.status_code)
+print(response.json())
+import pdb; pdb.set_trace()
+screen_name = response.json()['screen_name']
+
 
 paydays = requests.get('https://gratipay.com/about/charts.json').json()
 npayday = len(paydays)
@@ -25,7 +32,8 @@ status = "d whit537 Gratipay {npayday:,}—{nusers:,} users exchanged ${volume:,
          "https://gratipay.com/about/stats."
 status = status.format(npayday=npayday, nusers=nusers, volume=volume)
 
-print("Really tweet the following as @Gratipay?")
+
+print("Really tweet the following as @{}?".format(screen_name))
 print("=" * 78)
 print()
 print(status)
@@ -39,6 +47,5 @@ if not proceed:
     raise SystemExit
 
 print("Okay! Here we go ...")
-sess = twitter.get_auth_session()
 response = sess.post('https://api.twitter.com/1.1/statuses/update.json', {"status": status})
 import pdb; pdb.set_trace()
