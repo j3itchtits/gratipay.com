@@ -54,3 +54,20 @@ class Team(Model):
     def update_receiving(self, cursor=None):
         # Stubbed out for now. Migrate this over from Participant.
         pass
+
+
+    def migrate_tips(self):
+        self.db.run("""
+
+            INSERT INTO subscriptions
+                        (ctime, mtime, subscriber, team, amount, is_funded)
+                 SELECT ctime
+                      , mtime
+                      , tipper
+                      , %(slug)s
+                      , amount
+                      , is_funded
+                   FROM current_tips
+                  WHERE tippee=%(owner)s
+
+        """, {'slug': self.slug, 'owner': self.owner})
