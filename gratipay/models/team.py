@@ -57,6 +57,12 @@ class Team(Model):
 
 
     def migrate_tips(self):
+        subscriptions = self.db.all("SELECT * FROM subscriptions WHERE team=%s", (self.slug,))
+
+        # Make sure the migration hasn't been done already
+        if subscriptions:
+            raise AlreadyMigrated
+
         self.db.run("""
 
             INSERT INTO subscriptions
@@ -71,3 +77,6 @@ class Team(Model):
                   WHERE tippee=%(owner)s
 
         """, {'slug': self.slug, 'owner': self.owner})
+
+
+class AlreadyMigrated(Exception): pass
