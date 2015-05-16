@@ -400,36 +400,43 @@ class TestPayin(BillingHarness):
         assert payment.amount == D('0.51')
         assert payment.direction == 'to-team'
 
-    @pytest.mark.xfail(reason="haven't migrated_transfer_takes yet")
     def test_transfer_takes(self):
-        a_team = self.make_participant('a_team', claimed_time='now', number='plural', balance=20)
+        team_owner = self.make_participant('team_owner', claimed_time='now', last_ach_result='')
+        team_funder = self.make_participant('team_funder', claimed_time='now', balance=50)
+        team = self.make_team(is_approved=True, owner=team_owner)
+        team_funder.set_subscription_to(team, D('20.00'))
+
         alice = self.make_participant('alice', claimed_time='now')
-        a_team.add_member(alice)
-        a_team.add_member(self.make_participant('bob', claimed_time='now'))
-        a_team.set_take_for(alice, D('1.00'), alice)
+        team.add_member(alice)
+        team.add_member(self.make_participant('bob', claimed_time='now'))
+        team.set_take_for(alice, D('1.00'), alice)
 
         payday = Payday.start()
 
         # Test that payday ignores takes set after it started
-        a_team.set_take_for(alice, D('2.00'), alice)
+        team.set_take_for(alice, D('2.00'), alice)
 
         # Run the transfer multiple times to make sure we ignore takes that
         # have already been processed
         for i in range(3):
             with self.db.get_cursor() as cursor:
                 payday.prepare(cursor, payday.ts_start)
+                payday.process_subscriptions(cursor)
                 payday.transfer_takes(cursor, payday.ts_start)
+                payday.process_draws(cursor)
                 payday.update_balances(cursor)
 
         participants = self.db.all("SELECT username, balance FROM participants")
 
         for p in participants:
-            if p.username == 'a_team':
+            if p.username == 'team_owner':
                 assert p.balance == D('18.99')
             elif p.username == 'alice':
                 assert p.balance == D('1.00')
             elif p.username == 'bob':
                 assert p.balance == D('0.01')
+            elif p.username == 'team_funder':
+                assert p.balance == D('30.00')
             else:
                 assert p.balance == 0
 

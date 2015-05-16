@@ -281,27 +281,26 @@ class Payday(object):
 
     @staticmethod
     def transfer_takes(cursor, ts_start):
-        return  # XXX Bring me back!
         cursor.run("""
 
         INSERT INTO payday_takes
-            SELECT team, member, amount
-              FROM ( SELECT DISTINCT ON (team, member)
-                            team, member, amount, ctime
-                       FROM takes
-                      WHERE mtime < %(ts_start)s
-                   ORDER BY team, member, mtime DESC
-                   ) t
-             WHERE t.amount > 0
-               AND t.team IN (SELECT username FROM payday_participants)
-               AND t.member IN (SELECT username FROM payday_participants)
-               AND ( SELECT id
-                       FROM payday_transfers_done t2
-                      WHERE t.team = t2.tipper
-                        AND t.member = t2.tippee
-                        AND context = 'take'
-                   ) IS NULL
-          ORDER BY t.team, t.ctime DESC;
+             SELECT team, member, amount
+               FROM ( SELECT DISTINCT ON (team, member)
+                             team, member, amount, ctime
+                        FROM payroll
+                       WHERE mtime < %(ts_start)s
+                    ORDER BY team, member, mtime DESC
+                    ) pr
+              WHERE pr.amount > 0
+                AND pr.team IN (SELECT slug FROM payday_teams)
+                AND pr.member IN (SELECT username FROM payday_participants)
+                AND ( SELECT id
+                        FROM payday_payments_done done
+                       WHERE pr.team = done.team
+                         AND pr.member = done.participant
+                         AND direction = 'to-participant'
+                    ) IS NULL
+           ORDER BY pr.team, pr.ctime DESC;
 
         """, dict(ts_start=ts_start))
 
