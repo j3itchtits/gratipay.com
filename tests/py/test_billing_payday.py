@@ -93,11 +93,11 @@ class TestPayday(BillingHarness):
         assert debit.amount == 1576  # base amount + fee
         assert debit.description == 'janet'
 
-    @pytest.mark.xfail(reason="haven't migrated transfer_takes yet")
     @mock.patch.object(Payday, 'fetch_card_holds')
     @mock.patch('gratipay.billing.payday.create_card_hold')
     def test_ncc_failing(self, cch, fch):
-        self.janet.set_tip_to(self.homer, 24)
+        team = self.make_team('gratiteam', owner=self.homer, is_approved=True)
+        self.janet.set_subscription_to(team, 24)
         fch.return_value = {}
         cch.return_value = (None, 'oops')
         payday = Payday.start()
@@ -323,20 +323,24 @@ class TestPayin(BillingHarness):
         cancel.assert_called_with(fake_hold)
         assert len(holds) == 0
 
-    @pytest.mark.xfail(reason="haven't migrated transfer_takes yet")
     @mock.patch('gratipay.billing.payday.log')
     def test_payin_cancels_uncaptured_holds(self, log):
-        self.janet.set_tip_to(self.homer, 42)
-        alice = self.make_participant('alice', claimed_time='now',
-                                      is_suspicious=False)
-        self.make_exchange('balanced-cc', 50, 0, alice)
-        alice.set_tip_to(self.janet, 50)
+        team = self.make_team(owner=self.homer, is_approved=True)
+        self.janet.set_subscription_to(team, '20.00')
+        team.add_member(self.janet)
+        # Manually hike janet's take to $20
+        self.db.run("""
+            UPDATE payroll
+               SET amount='20'
+             WHERE team=%s
+               AND member=%s
+        """, (team.slug, self.janet.username))
         Payday.start().payin()
-        assert log.call_args_list[-3][0] == ("Captured 0 card holds.",)
-        assert log.call_args_list[-2][0] == ("Canceled 1 card holds.",)
-        assert Participant.from_id(alice.id).balance == 0
-        assert Participant.from_id(self.janet.id).balance == 8
-        assert Participant.from_id(self.homer.id).balance == 42
+
+        assert log.call_args_list[-6][0] == ("Captured 0 card holds.",)
+        assert log.call_args_list[-4][0] == ("Canceled 1 card holds.",)
+        assert Participant.from_id(self.janet.id).balance == 0
+        assert Participant.from_id(self.homer.id).balance == 0
 
     def test_payin_cant_make_balances_more_negative(self):
         self.db.run("""
@@ -463,7 +467,6 @@ class TestPayin(BillingHarness):
         payment = self.db.one("SELECT * FROM payments WHERE direction='to-participant'")
         assert payment.amount == D('0.51')
 
-    @pytest.mark.xfail(reason="haven't migrated_transfer_takes yet")
     @mock.patch.object(Payday, 'fetch_card_holds')
     def test_transfer_takes_doesnt_make_negative_transfers(self, fch):
         hold = balanced.CardHold(amount=1500, meta={'participant_id': self.janet.id},
@@ -471,19 +474,26 @@ class TestPayin(BillingHarness):
         hold.capture = lambda *a, **kw: None
         hold.save = lambda *a, **kw: None
         fch.return_value = {self.janet.id: hold}
-        self.janet.update_number('plural')
-        self.janet.set_tip_to(self.homer, 10)
-        self.janet.add_member(self.david)
-        Payday.start().payin()
-        assert Participant.from_id(self.david.id).balance == 0
-        assert Participant.from_id(self.homer.id).balance == 10
-        assert Participant.from_id(self.janet.id).balance == 0
 
-    @pytest.mark.xfail(reason="haven't migrated take_over_balances yet")
+        team = self.make_team('Gratiteam', self.homer, is_approved=True)
+        self.janet.set_subscription_to(team, D('0.5')) # Total team funds is $0.5
+        bob = self.make_participant('bob', claimed_time='now')
+        team.add_member(bob) # Bob should receive $0, coz the $0.5 is exhausted (kids first)
+        team.add_member(self.david)
+        team.set_take_for(self.david, D('1.00'), self.david) # David should only receive $0.5
+
+        Payday.start().payin()
+
+        assert Participant.from_id(bob.id).balance == 0
+        assert Participant.from_id(self.homer.id).balance == 0
+        assert Participant.from_id(self.david.id).balance == D('0.50')
+        assert Participant.from_id(self.janet.id).balance == D('8.91') # Upcharged
+
     def test_take_over_during_payin(self):
         alice = self.make_participant('alice', claimed_time='now', balance=50)
-        bob = self.make_participant('bob', claimed_time='now', elsewhere='twitter')
-        alice.set_tip_to(bob, 18)
+        bob = self.make_participant('bob', claimed_time='now', elsewhere='twitter', last_ach_result='')
+        team = self.make_team('team', owner=bob, is_approved=True)
+        alice.set_subscription_to(team, D('18.00'))
         payday = Payday.start()
         with self.db.get_cursor() as cursor:
             payday.prepare(cursor, payday.ts_start)
@@ -493,6 +503,8 @@ class TestPayin(BillingHarness):
             bruce.delete_elsewhere('twitter', str(bob.id))
             billy = self.make_participant('billy', claimed_time='now')
             billy.take_over(('github', str(bruce.id)), have_confirmation=True)
+            payday.process_payroll(cursor, payday.ts_start)
+            payday.process_draws(cursor)
             payday.update_balances(cursor)
         payday.take_over_balances()
         assert Participant.from_id(bob.id).balance == 0
