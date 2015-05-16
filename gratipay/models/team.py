@@ -1,7 +1,13 @@
 """Teams on Gratipay are plural participants with members.
 """
+from collections import OrderedDict
+from decimal import Decimal
+
 from postgres.orm import Model
 
+class MemberLimitReached(Exception): pass
+
+class StubParticipantAdded(Exception): pass
 
 class Team(Model):
     """Represent a Gratipay team.
@@ -61,42 +67,40 @@ class Team(Model):
     def add_member(self, member):
         """Add a member to this team.
         """
-        assert self.IS_PLURAL
         if len(self.get_current_takes()) == 149:
             raise MemberLimitReached
         if not member.is_claimed:
             raise StubParticipantAdded
-        self.__set_take_for(member, Decimal('0.01'), self)
+        self.__set_take_for(member, Decimal('0.01'), self.owner)
 
     def remove_member(self, member):
         """Remove a member from this team.
         """
-        assert self.IS_PLURAL
-        self.__set_take_for(member, Decimal('0.00'), self)
+        self.__set_take_for(member, Decimal('0.00'), self.owner)
 
     def remove_all_members(self, cursor=None):
         (cursor or self.db).run("""
-            INSERT INTO takes (ctime, member, team, amount, recorder) (
-                SELECT ctime, member, %(username)s, 0.00, %(username)s
-                  FROM current_takes
-                 WHERE team=%(username)s
-                   AND amount > 0
-            );
-        """, dict(username=self.username))
+            INSERT INTO payroll
+                        (ctime, member, team, amount, recorder)
+                        (
+                            SELECT ctime, member, %(team)s, 0.00, %(recorder)s
+                              FROM current_payroll
+                             WHERE team=%(team)s
+                               AND amount > 0
+                        );
+        """, dict(team=self.slug, recorder=self.owner))
 
     @property
     def nmembers(self):
-        assert self.IS_PLURAL
         return self.db.one("""
             SELECT COUNT(*)
-              FROM current_takes
+              FROM current_payroll
              WHERE team=%s
-        """, (self.username, ))
+        """, (self.slug, ))
 
     def get_members(self, current_participant=None):
         """Return a list of member dicts.
         """
-        assert self.IS_PLURAL
         takes = self.compute_actual_takes()
         members = []
         for take in takes.values():
@@ -106,7 +110,7 @@ class Team(Model):
             member['balance'] = take['balance']
             member['percentage'] = take['percentage']
 
-            member['removal_allowed'] = current_participant == self
+            member['removal_allowed'] = (current_participant.username == self.owner)
             member['editing_allowed'] = False
             member['is_current_user'] = False
             if current_participant is not None:
@@ -166,7 +170,7 @@ class Team(Model):
         """
 
         assert hasattr(member, 'username')
-        assert hasattr(recorder, 'username')
+        assert recorder == self.owner or hasattr(recorder, 'username')
         assert isinstance(take, Decimal)
 
         last_week = self.get_take_last_week_for(member)
@@ -185,9 +189,10 @@ class Team(Model):
             # Compute the current takes
             old_takes = self.compute_actual_takes(cursor)
             # Insert the new take
+            recordername = recorder if hasattr(recorder, 'username') else recorder
             cursor.run("""
 
-                INSERT INTO takes (ctime, member, team, amount, recorder)
+                INSERT INTO payroll (ctime, member, team, amount, recorder)
                      VALUES ( COALESCE (( SELECT ctime
                                             FROM payroll
                                            WHERE member=%(member)s
@@ -201,7 +206,7 @@ class Team(Model):
                             )
 
             """, dict(member=member.username, team=self.slug, amount=amount,
-                      recorder=recorder.username))
+                      recorder=recordername))
             # Compute the new takes
             new_takes = self.compute_actual_takes(cursor)
             # Update receiving amounts in the participants table
