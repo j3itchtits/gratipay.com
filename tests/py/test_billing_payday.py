@@ -400,7 +400,7 @@ class TestPayin(BillingHarness):
         assert payment.amount == D('0.51')
         assert payment.direction == 'to-team'
 
-    def test_transfer_takes(self):
+    def test_process_payroll(self):
         team_owner = self.make_participant('team_owner', claimed_time='now', last_ach_result='')
         team_funder = self.make_participant('team_funder', claimed_time='now', balance=50)
         team = self.make_team(is_approved=True, owner=team_owner)
@@ -422,7 +422,7 @@ class TestPayin(BillingHarness):
             with self.db.get_cursor() as cursor:
                 payday.prepare(cursor, payday.ts_start)
                 payday.process_subscriptions(cursor)
-                payday.transfer_takes(cursor, payday.ts_start)
+                payday.process_payroll(cursor, payday.ts_start)
                 payday.process_draws(cursor)
                 payday.update_balances(cursor)
 
@@ -450,7 +450,7 @@ class TestPayin(BillingHarness):
         with self.db.get_cursor() as cursor:
             payday.prepare(cursor, payday.ts_start)
             payday.process_subscriptions(cursor)
-            payday.transfer_takes(cursor, payday.ts_start)
+            payday.process_payroll(cursor, payday.ts_start)
             payday.process_draws(cursor)
             assert cursor.one("select new_balance from payday_participants "
                               "where username='hannibal'") == D('0.51')

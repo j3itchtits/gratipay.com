@@ -74,7 +74,7 @@ class Payday(object):
                 prepare
                 create_card_holds
                 process_subscriptions
-                transfer_takes
+                process_payroll
                 process_draws
                 settle_card_holds
                 update_balances
@@ -161,7 +161,7 @@ class Payday(object):
             self.prepare(cursor, self.ts_start)
             holds = self.create_card_holds(cursor)
             self.process_subscriptions(cursor)
-            self.transfer_takes(cursor, self.ts_start)
+            self.process_payroll(cursor, self.ts_start)
             self.process_draws(cursor)
             payments = cursor.all("""
                 SELECT * FROM payments WHERE "timestamp" > %s
@@ -280,7 +280,7 @@ class Payday(object):
 
 
     @staticmethod
-    def transfer_takes(cursor, ts_start):
+    def process_payroll(cursor, ts_start):
         cursor.run("""
 
         INSERT INTO payday_takes
