@@ -412,6 +412,8 @@ class Payday(object):
     def payout(self):
         """This is the second stage of payday in which we send money out to the
         bank accounts of participants.
+
+        We only payout to team owners/members.
         """
         log("Starting payout loop.")
         participants = self.db.all("""
@@ -423,15 +425,17 @@ class Payday(object):
                       WHERE r.participant = p.id
                         AND network = 'balanced-ba'
                    ) > 0
-
-          ---- Only include team owners
-          ---- TODO: Include members on payroll once process_payroll is implemented
-
                AND ( SELECT count(*)
                        FROM teams t
                       WHERE t.owner = p.username
                         AND t.is_approved IS TRUE
                         AND t.is_closed IS NOT TRUE
+                   ) + (
+                     SELECT count(*)
+                       FROM current_payroll pr
+                       JOIN teams t ON t.slug = pr.team
+                      WHERE pr.member = p.username
+                        AND t.is_approved IS TRUE
                    ) > 0
         """)
         def credit(participant):
