@@ -570,6 +570,27 @@ class TestPayout(Harness):
         payday = self.fetch_payday()
         assert payday['nach_failing'] == 1
 
+    @mock.patch('gratipay.billing.payday.ach_credit')
+    def test_payout_is_constrained_to_owners_and_payroll(self, ach):
+        team_owner = self.make_participant('team_owner', claimed_time='now',
+                                           last_ach_result='', is_suspicious=False)
+        team = self.make_team('gratiteam', owner=team_owner, is_approved=True)
+        alice = self.make_participant('alice', claimed_time='now', is_suspicious=False,
+                                      last_ach_result='')
+        bob = self.make_participant('bob', claimed_time='now', is_suspicious=False,
+                                      last_ach_result='')
+        team.add_member(bob)
+        self.make_exchange('balanced-cc', 20, 0, alice) # Alice shouldn't be paid out
+        self.make_exchange('balanced-cc', 30, 0, bob)
+        self.make_exchange('balanced-cc', 30, 0, team_owner)
+
+        Payday.start().payout()
+
+        assert ach.call_count == 2
+
+        # Check for specifics
+
+
 
 class TestNotifyParticipants(EmailHarness):
 
